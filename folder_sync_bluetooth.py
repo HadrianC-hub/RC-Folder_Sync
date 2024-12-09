@@ -3,7 +3,7 @@ import threading
 import os
 import time
 
-# Configuración inicial.
+# Configuración inicial
 local_addr = "90:09:DF:A2:85:D1"  # Dirección MAC del otro dispositivo
 peer_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
 port = 30  # Canal Bluetooth (RFCOMM)
@@ -56,9 +56,38 @@ def delete_file(target_folder, file_name):
 
         print(f"Archivo eliminado: {file_name}")
 
+# Función para recibir una carpeta
+def receive_folder(sock, target_folder, folder_name):
+    """Recibe un archivo desde el dispositivo remoto y lo guarda."""
+    try:       
+        folder_path = os.path.join(target_folder, folder_name)
+        print(f"Recibiendo carpeta: {folder_name}")
+
+        # Creando nuevo directorio de ser necesario
+        if folder_path:  # Evita problemas si no hay carpeta en el path
+            os.makedirs(folder_path, exist_ok=True)
+
+        folders_in_folder.append(folder_path)
+        print(f"Carpeta recibida: {folder_name}")
+    except Exception as e:
+        print(f"Error al recibir archivo: {e}")
+
+# Función para eliminar una carpeta
+def delete_folder(target_folder, folder_name):
+    folder_path = os.path.join(target_folder, folder_name)
+    if os.path.exists(folder_path):
+        os.rmdir(folder_path)
+
+        # Eliminar el archivo de la lista de archivos
+        i = folders_in_folder.count(folder_path)
+        if i>0:
+            for j in range(i):
+                folders_in_folder.remove(folder_path)
+        print(f"Carpeta eliminada: {folder_name}")
 
 
-# Servidor: Maneja conexiones entrantes
+
+# Servidor: Maneja conexiones entrantes.
 def start_server(local_addr, port, local_folder_route):
     # Iniciar socket bluetooth
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
@@ -72,19 +101,25 @@ def start_server(local_addr, port, local_folder_route):
         print(f"Conexión recibida de {address[0]}")
         data = client_sock.recv(1024).decode()
 
+        # Información recibida:
+        #print(f"info: {data}")
+
         # Verificando acción
         if data.startswith("FILE::"):
             file_name = data.split("::")[1]
             receive_file(client_sock, local_folder_route, file_name)
         elif data.startswith("FOLDER::"):
-            #IMPLEMENTAR RECIBIR CARPETAS
+            file_name = data.split("::")[1]
+            receive_folder(client_sock, local_folder_route, file_name)
         elif data.startswith("DELETE::"):
             file_name = data.split("::")[1]
             delete_file(local_folder_route, file_name)
         elif data.startswith("DELETEF::"):
-            #IMPLEMENTAR BORRADO DE CARPETAS
+            file_name = data.split("::")[1]
+            delete_folder(local_folder_route, file_name)
         # Cerrando socket
         client_sock.close()
+
 
 # Iniciar servidor en un hilo
 server_thread = threading.Thread(target=start_server, args=(local_addr, port, local_folder_route))
