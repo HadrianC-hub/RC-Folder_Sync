@@ -143,21 +143,23 @@ def start_server(local_addr, port, local_folder_route):
         # Información recibida:
         #print(f"info: {data}")
 
-        # Verificando acción
-        if data.startswith("FILE::"):
-            file_name = data.split("::")[1]
-            receive_file(client_sock, local_folder_route, file_name)
-        elif data.startswith("FOLDER::"):
-            file_name = data.split("::")[1]
-            receive_folder(client_sock, local_folder_route, file_name)
-        elif data.startswith("DELETE::"):
-            file_name = data.split("::")[1]
-            delete_file(local_folder_route, file_name)
-        elif data.startswith("DELETEF::"):
-            file_name = data.split("::")[1]
-            delete_folder(local_folder_route, file_name)
-        # Cerrando socket
-        client_sock.close()
+        # Bloqueando acceso al monitor de carpetas
+        with folder_lock:
+            # Verificando acción
+            if data.startswith("FILE::"):
+                file_name = data.split("::")[1]
+                receive_file(client_sock, local_folder_route, file_name)
+            elif data.startswith("FOLDER::"):
+                file_name = data.split("::")[1]
+                receive_folder(client_sock, local_folder_route, file_name)
+            elif data.startswith("DELETE::"):
+                file_name = data.split("::")[1]
+                delete_file(local_folder_route, file_name)
+            elif data.startswith("DELETEF::"):
+                file_name = data.split("::")[1]
+                delete_folder(local_folder_route, file_name)
+            # Cerrando socket
+            client_sock.close()
 
 # Monitor: Sincroniza cambios locales con el otro dispositivo
 def monitor_folder(local_folder_route, peer_addr, port):
@@ -166,48 +168,66 @@ def monitor_folder(local_folder_route, peer_addr, port):
 
     # Monitor de carpetas en espera a cambios
     while True:
+        time.sleep(2)
+        # Bloqueando el acceso a conexiones entrantes
+        with folder_lock:
 
-        # Extrayendo cambios en la carpeta
-        (current_files_in_folder, current_folders_in_folder, current_modif_times) = get_all_items(local_folder_route)
-        new_files = get_files(current_files_in_folder, files_in_folder)
-        new_folders = get_files(current_folders_in_folder, folders_in_folder)
-        deleted_files = get_files(files_in_folder, current_files_in_folder)
-        deleted_folders = get_files(folders_in_folder, current_folders_in_folder)
-        modified_files = compare_files_mod_time(files_in_folder, current_files_in_folder, modif_times, current_modif_times)
-        modified_files = get_files(modified_files, new_files)
-        modified_files = get_files(modified_files, deleted_files)
-        for file_name in modified_files:
-            deleted_files.append(file_name)
-            new_files.append(file_name)
+            # Extrayendo cambios en la carpeta
+            (current_files_in_folder, current_folders_in_folder, current_modif_times) = get_all_items(local_folder_route)
+            new_files = get_files(current_files_in_folder, files_in_folder)
+            new_folders = get_files(current_folders_in_folder, folders_in_folder)
+            deleted_files = get_files(files_in_folder, current_files_in_folder)
+            deleted_folders = get_files(folders_in_folder, current_folders_in_folder)
+            modified_files = compare_files_mod_time(files_in_folder, current_files_in_folder, modif_times, current_modif_times)
+            modified_files = get_files(modified_files, new_files)
+            modified_files = get_files(modified_files, deleted_files)
+            for file_name in modified_files:
+                deleted_files.append(file_name)
+                new_files.append(file_name)
 
-        # Mostrando cambios al usuario
-        if len(new_files)>0:
-            print(f"Nuevos archivos:")
-            print(", ".join(new_files))
-            print(f"\n")
-        if len(new_folders)>0:
-            print(f"Nuevas carpetas:")
-            print(", ".join(new_folders))
-            print(f"\n")
-        if len(deleted_files)>0:
-            print(f"Archivos borrados:")
-            print(", ".join(deleted_files))
-            print(f"\n")
-        if len(deleted_folders)>0:
-            print(f"Carpetas borradas:")
-            print(", ".join(deleted_folders))
-            print(f"\n")
-        if len(modified_files)>0:
-            print(f"Archivos modificados:")
-            print(", ".join(modified_files))
-            print(f"\n")
+            # Mostrando cambios al usuario
+            if len(new_files)>0:
+                print(f"Nuevos archivos:")
+                print(", ".join(new_files))
+                print(f"\n")
+            if len(new_folders)>0:
+                print(f"Nuevas carpetas:")
+                print(", ".join(new_folders))
+                print(f"\n")
+            if len(deleted_files)>0:
+                print(f"Archivos borrados:")
+                print(", ".join(deleted_files))
+                print(f"\n")
+            if len(deleted_folders)>0:
+                print(f"Carpetas borradas:")
+                print(", ".join(deleted_folders))
+                print(f"\n")
+            if len(modified_files)>0:
+                print(f"Archivos modificados:")
+                print(", ".join(modified_files))
+                print(f"\n")
 
-        # ENVIAR SOLICITUDES DE ARCHIVOS Y CARPETAS NUEVOS Y BORRADOS. TRATAR A UN ARCHIVO MODIFICADO COMO BORRARLO Y DESPUES COPIARLO
+            # Enviando solicitud para archivos borrados
+            for file_name in deleted_files:
+                #IMPLEMENTAR ARCHIVOS BORRADOS
 
-        # Actualizando cambios de la carpeta
-        files_in_folder = current_files_in_folder
-        folders_in_folder = current_folders_in_folder
-        modif_times = current_modif_times
+            # Enviando solicitud para carpetas borradas
+            for folder_name in deleted_folders:
+                #IMPLEMENTAR CARPETAS BORRADAS
+
+            # Enviando solicitud para carpetas nuevas
+            for folder_name in new_folders:
+                #IMPLEMENTAR CARPETAS NUEVAS
+
+            # Enviando solicitud para archivos nuevos
+            for file_name in new_files:
+                #IMPLEMENTAR ARCHIVOS NUEVOS
+
+            # Actualizando cambios de la carpeta
+            files_in_folder = current_files_in_folder
+            folders_in_folder = current_folders_in_folder
+            modif_times = current_modif_times
+
 
 #Items iniciales dentro de la carpeta
 (files_in_folder, folders_in_folder, modif_times) = ([], [], [])
