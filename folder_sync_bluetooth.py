@@ -4,10 +4,14 @@ import os
 import time
 
 # Configuración inicial:
-peer_addr = "90:09:DF:A2:85:D1"  # Dirección MAC del otro dispositivo
-local_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
+local_addr = "90:09:DF:A2:85:D1"  # Dirección MAC del otro dispositivo
+peer_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
 port = 30  # Canal Bluetooth (RFCOMM)
-local_folder_route = "D:/Carpeta1/"  # Carpeta local a sincronizar
+local_folder_route = "D:/Carpeta2/"  # Carpeta local a sincronizar
+sync_interval = 2  # Intervalo de sincronización (en segundos)
+
+# Lock para sincronizar el acceso a recursos compartidos
+folder_lock = threading.Lock()
 
 # Obtener todos los items nuevos en el directorio
 def get_all_items(folder_path):
@@ -49,6 +53,25 @@ def compare_files_mod_time(init_files_in_folder, current_files_in_folder, init_m
             if current_files_in_folder[i]==init_files_in_folder[j] and current_modif_times[i]!=init_modif_times[j]:
                 modif_files.append(current_files_in_folder[i])
     return modif_files
+
+# Función para enviar un archivo
+def send_file(sock, file_path, absolute_route):
+    #file_name = os.path.basename(file_path)
+    print(f"Enviando archivo: {file_path}")
+    sock.send(f"FILE::{file_path}".encode())
+    with open(absolute_route, "rb") as file:
+        while True:
+            data = file.read(4096)
+            if not data:
+                break
+            sock.send(data)
+    print(f"Archivo enviado: {file_path}")
+
+# Función para enviar una carpeta
+def send_folder(sock, folder_path):
+    print(f"Enviando archivo: {folder_path}")
+    sock.send(f"FOLDER::{folder_path}".encode())
+    print(f"Archivo enviado: {folder_path}")
 
 # Función para recibir un archivo
 def receive_file(sock, target_folder, file_name):
@@ -126,6 +149,8 @@ def delete_folder(target_folder, folder_name):
                 folders_in_folder.remove(folder_path)
         print(f"Carpeta eliminada: {folder_name}")
 
+
+
 # Servidor: Maneja conexiones entrantes
 def start_server(local_addr, port, local_folder_route):
     # Iniciar socket bluetooth
@@ -168,7 +193,7 @@ def monitor_folder(local_folder_route, peer_addr, port):
 
     # Monitor de carpetas en espera a cambios
     while True:
-        time.sleep(2)
+        time.sleep(sync_interval)
         # Bloqueando el acceso a conexiones entrantes
         with folder_lock:
 
@@ -209,19 +234,47 @@ def monitor_folder(local_folder_route, peer_addr, port):
 
             # Enviando solicitud para archivos borrados
             for file_name in deleted_files:
-                #IMPLEMENTAR ARCHIVOS BORRADOS
+                relative_route = os.path.relpath(file_name, start=local_folder_route)
+                print(f"Archivo eliminado localmente: {file_name}")
+                with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+                    try:
+                        sock.connect((peer_addr, port))
+                        sock.send(f"DELETE::{relative_route}".encode())
+                    except Exception as e:
+                        print(f"Error al conectar con el servidor: {e}")
 
             # Enviando solicitud para carpetas borradas
             for folder_name in deleted_folders:
-                #IMPLEMENTAR CARPETAS BORRADAS
+                relative_route = os.path.relpath(folder_name, start=local_folder_route)
+                print(f"Carpeta eliminada localmente: {folder_name}")
+                with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+                    try:
+                        sock.connect((peer_addr, port))
+                        sock.send(f"DELETEF::{relative_route}".encode())
+                    except Exception as e:
+                        print(f"Error al conectar con el servidor: {e}")
 
             # Enviando solicitud para carpetas nuevas
             for folder_name in new_folders:
-                #IMPLEMENTAR CARPETAS NUEVAS
+                relative_route = os.path.relpath(folder_name, start=local_folder_route)
+                print(f"Detectada nueva carpeta: {folder_name}")
+                with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+                    try:
+                        sock.connect((peer_addr, port))
+                        send_folder(sock, relative_route)
+                    except Exception as e:
+                        print(f"Error al conectar con el servidor: {e}")
 
             # Enviando solicitud para archivos nuevos
             for file_name in new_files:
-                #IMPLEMENTAR ARCHIVOS NUEVOS
+                relative_route = os.path.relpath(file_name, start=local_folder_route)
+                print(f"Detectado nuevo archivo: {file_name}")
+                with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
+                    try:
+                        sock.connect((peer_addr, port))
+                        send_file(sock, relative_route, file_name)
+                    except Exception as e:
+                        print(f"Error al conectar con el servidor: {e}")
 
             # Actualizando cambios de la carpeta
             files_in_folder = current_files_in_folder
