@@ -2,16 +2,21 @@ import socket
 import threading
 import os
 import time
+import shutil
 
 # Configuración inicial:
-local_addr = "90:09:DF:A2:85:D1"  # Dirección MAC del otro dispositivo
-peer_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
+peer_addr = "58:6C:25:61:A9:BC"  # Dirección MAC del otro dispositivo
+local_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
 port = 30  # Canal Bluetooth (RFCOMM)
-local_folder_route = "D:/Carpeta2/"  # Carpeta local a sincronizar
+local_folder_route = "D:/Carpeta1/"  # Carpeta local a sincronizar
 sync_interval = 2  # Intervalo de sincronización (en segundos)
 
 # Lock para sincronizar el acceso a recursos compartidos
 folder_lock = threading.Lock()
+
+
+############################################################################################################################################################
+
 
 # Obtener todos los items nuevos en el directorio
 def get_all_items(folder_path):
@@ -61,7 +66,7 @@ def send_file(sock, file_path, absolute_route):
     sock.send(f"FILE::{file_path}".encode())
     with open(absolute_route, "rb") as file:
         while True:
-            data = file.read(4096)
+            data = file.read(1048576)
             if not data:
                 break
             sock.send(data)
@@ -73,6 +78,10 @@ def send_folder(sock, folder_path):
     sock.send(f"FOLDER::{folder_path}".encode())
     print(f"Archivo enviado: {folder_path}")
 
+
+############################################################################################################################################################
+
+
 # Función para recibir un archivo
 def receive_file(sock, target_folder, file_name):
     """Recibe un archivo desde el dispositivo remoto y lo guarda."""
@@ -80,7 +89,7 @@ def receive_file(sock, target_folder, file_name):
         # Recibir el paquete de información del archivo
         data=b''
         while True:
-            chunk = sock.recv(4096)  # Recibe hasta 4096 bytes
+            chunk = sock.recv(1048576)  # Recibe hasta 4096 bytes
             if not chunk:
                 # Si chunk está vacío, significa que se ha cerrado la conexión
                 break
@@ -101,6 +110,7 @@ def receive_file(sock, target_folder, file_name):
         # Agregar el archivo a la lista de archivos
         files_in_folder.append(file_path)
         modif_times.append(os.path.getmtime(file_path))
+        last_received_files.append(file_path)               #ARREGLADO BUG#1
 
         print(f"Archivo recibido: {file_name}")
     except Exception as e:
@@ -140,7 +150,7 @@ def receive_folder(sock, target_folder, folder_name):
 def delete_folder(target_folder, folder_name):
     folder_path = os.path.join(target_folder, folder_name)
     if os.path.exists(folder_path):
-        os.rmdir(folder_path)
+        shutil.rmtree(folder_path)              #ARREGLADO BUG#3
 
         # Eliminar el archivo de la lista de archivos
         i = folders_in_folder.count(folder_path)
@@ -149,6 +159,8 @@ def delete_folder(target_folder, folder_name):
                 folders_in_folder.remove(folder_path)
         print(f"Carpeta eliminada: {folder_name}")
 
+
+############################################################################################################################################################
 
 
 # Servidor: Maneja conexiones entrantes
@@ -163,10 +175,7 @@ def start_server(local_addr, port, local_folder_route):
     while True:
         client_sock, address = sock.accept()
         print(f"Conexión recibida de {address[0]}")
-        data = client_sock.recv(1024).decode()
-
-        # Información recibida:
-        #print(f"info: {data}")
+        data = client_sock.recv(1048576).decode()
 
         # Bloqueando acceso al monitor de carpetas
         with folder_lock:
@@ -188,8 +197,8 @@ def start_server(local_addr, port, local_folder_route):
 
 # Monitor: Sincroniza cambios locales con el otro dispositivo
 def monitor_folder(local_folder_route, peer_addr, port):
-    # Incluyendo variables globales
-    global files_in_folder, folders_in_folder, modif_times
+    # Incluyendo variables globales                         #ARREGLADO BUG#1
+    global files_in_folder, folders_in_folder, modif_times, last_received_files 
 
     # Monitor de carpetas en espera a cambios
     while True:
@@ -206,31 +215,31 @@ def monitor_folder(local_folder_route, peer_addr, port):
             modified_files = compare_files_mod_time(files_in_folder, current_files_in_folder, modif_times, current_modif_times)
             modified_files = get_files(modified_files, new_files)
             modified_files = get_files(modified_files, deleted_files)
-            for file_name in modified_files:
-                deleted_files.append(file_name)
-                new_files.append(file_name)
+            modified_files = get_files(modified_files, last_received_files)         #ARREGLADO BUG#1
 
             # Mostrando cambios al usuario
             if len(new_files)>0:
                 print(f"Nuevos archivos:")
                 print(", ".join(new_files))
-                print(f"\n")
             if len(new_folders)>0:
                 print(f"Nuevas carpetas:")
                 print(", ".join(new_folders))
-                print(f"\n")
             if len(deleted_files)>0:
                 print(f"Archivos borrados:")
                 print(", ".join(deleted_files))
-                print(f"\n")
             if len(deleted_folders)>0:
                 print(f"Carpetas borradas:")
                 print(", ".join(deleted_folders))
-                print(f"\n")
             if len(modified_files)>0:
                 print(f"Archivos modificados:")
                 print(", ".join(modified_files))
+            if len(new_files)>0 or len(new_folders)>0 or len(deleted_files)>0 or len(deleted_folders)>0 or len(modified_files)>0:
                 print(f"\n")
+
+            # Integrando archivos modificados a las listas para realizar acciones de borrado y enviado (#ARREGLADO BUG#2)
+            for file_name in modified_files:
+                deleted_files.append(file_name)
+                new_files.append(file_name)
 
             # Enviando solicitud para archivos borrados
             for file_name in deleted_files:
@@ -242,6 +251,7 @@ def monitor_folder(local_folder_route, peer_addr, port):
                         sock.send(f"DELETE::{relative_route}".encode())
                     except Exception as e:
                         print(f"Error al conectar con el servidor: {e}")
+                print(f"\n")
 
             # Enviando solicitud para carpetas borradas
             for folder_name in deleted_folders:
@@ -253,6 +263,7 @@ def monitor_folder(local_folder_route, peer_addr, port):
                         sock.send(f"DELETEF::{relative_route}".encode())
                     except Exception as e:
                         print(f"Error al conectar con el servidor: {e}")
+                print(f"\n")        
 
             # Enviando solicitud para carpetas nuevas
             for folder_name in new_folders:
@@ -264,6 +275,7 @@ def monitor_folder(local_folder_route, peer_addr, port):
                         send_folder(sock, relative_route)
                     except Exception as e:
                         print(f"Error al conectar con el servidor: {e}")
+                print(f"\n")        
 
             # Enviando solicitud para archivos nuevos
             for file_name in new_files:
@@ -275,15 +287,39 @@ def monitor_folder(local_folder_route, peer_addr, port):
                         send_file(sock, relative_route, file_name)
                     except Exception as e:
                         print(f"Error al conectar con el servidor: {e}")
+                print(f"\n")        
 
             # Actualizando cambios de la carpeta
             files_in_folder = current_files_in_folder
             folders_in_folder = current_folders_in_folder
             modif_times = current_modif_times
+            last_received_files = []                         #ARREGLADO BUG#1
 
 
-#Items iniciales dentro de la carpeta
-(files_in_folder, folders_in_folder, modif_times) = ([], [], [])
+############################################################################################################################################################
+
+
+# Recibir entrada del usuario
+entrada = input("Por favor, ingresa la dirección MAC local: XX:XX:XX:XX:XX:XX\n Dirección MAC local: ")
+# Verificando que la dirección MAC ingresada sea correcta
+while not len(entrada) == 17 or not entrada[2] == ':' or not entrada[5] == ':' or not entrada[8] == ':' or not entrada[11] == ':' or not entrada[14] == ':':
+    entrada = input("Formato inválido, por favor inserte la dirección MAC local: XX:XX:XX:XX:XX:XX\n Dirección MAC local: ")
+local_addr = entrada
+
+entrada = input("Por favor, ingresa la dirección MAC remota: XX:XX:XX:XX:XX:XX\n Dirección MAC remota: ")
+# Verificando que la dirección MAC ingresada sea correcta
+while not len(entrada) == 17 or not entrada[2] == ':' or not entrada[5] == ':' or not entrada[8] == ':' or not entrada[11] == ':' or not entrada[14] == ':':
+    entrada = input("Formato inválido, por favor inserte la dirección MAC remota: XX:XX:XX:XX:XX:XX\n Dirección MAC remota: ")
+peer_addr = entrada
+
+entrada = input("Por favor, ingresa la ruta a la carpeta que desea sincronizar: C:/ruta/a/la/carpeta/ \n Ruta a la carpeta: ")
+# Verificando que la dirección MAC ingresada sea correcta
+while not entrada or not entrada[-1] == '/' or not os.path.exists(entrada):
+    entrada = input("Ruta inválido, por favor ingresa la ruta a la carpeta que desea sincronizar: C:/ruta/a/la/carpeta/ \n Ruta a la carpeta: ")
+local_folder_route = entrada
+
+#Items iniciales dentro de la carpeta             #ARREGLADO BUG#1
+(files_in_folder, folders_in_folder, modif_times, last_received_files) = ([], [], [], [])   
 
 # Iniciar servidor en un hilo
 server_thread = threading.Thread(target=start_server, args=(local_addr, port, local_folder_route))
