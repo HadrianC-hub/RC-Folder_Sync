@@ -4,6 +4,8 @@ import os
 import time
 import shutil
 
+recv_bits = 1000000
+
 # Configuración inicial:
 peer_addr = "58:6C:25:61:A9:BC"  # Dirección MAC del otro dispositivo
 local_addr = "7C:25:DA:C2:86:A9"  # Dirección MAC local
@@ -66,7 +68,7 @@ def send_file(sock, file_path, absolute_route):
     sock.send(f"FILE::{file_path}".encode())
     with open(absolute_route, "rb") as file:
         while True:
-            data = file.read(1048576)
+            data = file.read(recv_bits)
             if not data:
                 break
             sock.send(data)
@@ -89,7 +91,8 @@ def receive_file(sock, target_folder, file_name):
         # Recibir el paquete de información del archivo
         data=b''
         while True:
-            chunk = sock.recv(1048576)  # Recibe hasta 4096 bytes
+            chunk = sock.recv(recv_bits)  # Recibe hasta 4096 bytes
+            print(len(chunk))
             if not chunk:
                 # Si chunk está vacío, significa que se ha cerrado la conexión
                 break
@@ -175,7 +178,7 @@ def start_server(local_addr, port, local_folder_route):
     while True:
         client_sock, address = sock.accept()
         print(f"Conexión recibida de {address[0]}")
-        data = client_sock.recv(1048576).decode()
+        data = client_sock.recv(recv_bits).decode()
 
         # Bloqueando acceso al monitor de carpetas
         with folder_lock:
